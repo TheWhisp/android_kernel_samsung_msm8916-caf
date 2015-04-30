@@ -31,6 +31,7 @@ struct wcnss_wlan_config {
 	int	is_pronto_vt;
 	int	is_pronto_v3;
 	void __iomem	*msm_wcnss_base;
+	int	iris_id;
 };
 
 enum {
@@ -86,6 +87,7 @@ void wcnss_unregister_thermal_mitigation(
 struct platform_device *wcnss_get_platform_device(void);
 struct wcnss_wlan_config *wcnss_get_wlan_config(void);
 void wcnss_set_iris_xo_mode(int iris_xo_mode_set);
+int wcnss_get_iris_name(char *iris_version);
 int wcnss_wlan_power(struct device *dev,
 				struct wcnss_wlan_config *cfg,
 				enum wcnss_opcode opcode,

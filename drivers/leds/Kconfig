@@ -24,6 +24,21 @@ config LEDS_CLASS
 
 comment "LED drivers"
 
+config FLED_SM5701
+	tristate "SiliconMitus SM5701 flash LED driver"
+	depends on MFD_SM5701
+	help
+	  A driver for SiliconMitus SM5701 flash LED
+
+config LEDS_KTD2026
+	tristate "LED driver for KTD2026 LED"
+	depends on I2C
+	  help
+	  This option enables support for RGB LED driver
+	  accessed via the I2C bus.
+	  KTD2026 is a fully programmable, constant current
+	  three channel LED driver with flexible control interface.
+
 config LEDS_88PM860X
 	tristate "LED Support for Marvell 88PM860x PMIC"
 	depends on LEDS_CLASS
@@ -517,6 +532,43 @@ config LEDS_BLINKM
 	help
 	  This option enables support for the BlinkM RGB LED connected
 	  through I2C. Say Y to enable support for the BlinkM LED.
+
+config FLASHLIGHT
+	bool "Flashlight Support"
+	help
+	  This option enables the led sysfs class in /sys/class/flashlight.
+
+config RT_FLASH_LED
+	tristate "Richtek flash LED driver support"
+	depends on FLASHLIGHT
+	help
+	  Say Y here to enable Richtek's flash LED driver HAL architecture
+
+config FLED_RT5033
+	tristate "Richtek RT5033 flash LED driver"
+	depends on RT_FLASH_LED && MFD_RT5033
+	help
+	  A driver for Richtek RT5033 flash LED
+choice
+	prompt "Control method"
+	depends on FLED_RT5033
+	default FLED_RT5033_I2C
+	help
+	  Choose which control signal to use for enabling/disabling torch and flash light.
+
+config FLED_RT5033_I2C
+	bool "I2C"
+	help
+	  Use I2C to enable/disable torch and flash light.
+	  If unsure, say N.
+
+config FLED_RT5033_EXT_GPIO
+	bool "External(or ISP) GPIO"
+	help
+	  Use GPIO pins to enable/disable torch and flash light.
+	  If unsure, say N.
+
+endchoice	 
 
 comment "LED Triggers"
 source "drivers/leds/trigger/Kconfig"

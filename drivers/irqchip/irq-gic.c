@@ -48,6 +48,7 @@
 #include <asm/irq.h>
 #include <asm/exception.h>
 #include <asm/smp_plat.h>
+#include <linux/wakeup_reason.h>
 
 #include "irqchip.h"
 
@@ -271,7 +272,7 @@ static void gic_show_resume_irq(struct gic_chip_data *gic)
 {
 	unsigned int i;
 	u32 enabled;
-	u32 pending[32];
+	unsigned long pending[32];
 	void __iomem *base = gic_data_dist_base(gic);
 
 	if (!msm_show_resume_irq_mask)
@@ -285,19 +286,13 @@ static void gic_show_resume_irq(struct gic_chip_data *gic)
 	}
 	raw_spin_unlock(&irq_controller_lock);
 
-	for (i = find_first_bit((unsigned long *)pending, gic->gic_irqs);
-	i < gic->gic_irqs;
-	i = find_next_bit((unsigned long *)pending, gic->gic_irqs, i+1)) {
-		struct irq_desc *desc = irq_to_desc(i + gic->irq_offset);
-		const char *name = "null";
-
-		if (desc == NULL)
-			name = "stray irq";
-		else if (desc->action && desc->action->name)
-			name = desc->action->name;
-
-		pr_warning("%s: %d triggered %s\n", __func__,
-					i + gic->irq_offset, name);
+	for (i = find_first_bit(pending, gic->gic_irqs);
+		i < gic->gic_irqs;
+		i = find_next_bit(pending, gic->gic_irqs, i+1)) {
+#ifdef CONFIG_SEC_PM_DEBUG
+			log_wakeup_reason(i + gic->irq_offset);
+			update_wakeup_reason_stats(i + gic->irq_offset);
+#endif
 	}
 }
 

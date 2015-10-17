@@ -98,7 +98,7 @@ static struct mdss_panel_intf pan_types[] = {
 	{"edp", MDSS_PANEL_INTF_EDP},
 	{"hdmi", MDSS_PANEL_INTF_HDMI},
 };
-static char mdss_mdp_panel[MDSS_MAX_PANEL_LEN];
+char mdss_mdp_panel[MDSS_MAX_PANEL_LEN];
 
 struct mdss_iommu_map_type mdss_iommu_map[MDSS_IOMMU_MAX_DOMAIN] = {
 	[MDSS_IOMMU_DOMAIN_UNSECURE] = {
@@ -316,7 +316,9 @@ static void mdss_mdp_bus_scale_unregister(struct mdss_data_type *mdata)
 		mdata->reg_bus_hdl = 0;
 	}
 }
-
+#if defined(CONFIG_FB_MSM_MDSS_SAMSUNG)
+u64 bus_ab_quota_dbg, bus_ib_quota_dbg;
+#endif
 static int mdss_mdp_bus_scale_set_quota(u64 ab_quota_rt, u64 ab_quota_nrt,
 		u64 ib_quota_rt, u64 ib_quota_nrt)
 {
@@ -385,7 +387,10 @@ static int mdss_mdp_bus_scale_set_quota(u64 ab_quota_rt, u64 ab_quota_nrt,
 			vect = &bw_table->usecase[new_uc_idx].vectors[i];
 			vect->ab = ab_quota[i];
 			vect->ib = ib_quota[i];
-
+#if defined(CONFIG_FB_MSM_MDSS_SAMSUNG)
+			bus_ab_quota_dbg = vect->ab;
+			bus_ib_quota_dbg = vect->ib;
+#endif
 			pr_debug("uc_idx=%d %s path idx=%d ab=%llu ib=%llu\n",
 				new_uc_idx, (i < rt_axi_port_cnt) ? "rt" : "nrt"
 				, i, vect->ab, vect->ib);
@@ -1128,6 +1133,8 @@ int mdss_hw_init(struct mdss_data_type *mdata)
 	char *offset;
 	struct mdss_mdp_pipe *vig;
 
+	mdss_mdp_clk_ctrl(MDP_BLOCK_POWER_ON);
+
 	mdss_hw_rev_init(mdata);
 
 	/* disable hw underrun recovery */
@@ -1168,6 +1175,8 @@ int mdss_hw_init(struct mdss_data_type *mdata)
 	if (mdata->mdp_rev == MDSS_MDP_HW_REV_200)
 		for (i = 0; i < mdata->nvig_pipes; i++)
 			mdss_mdp_hscl_init(&vig[i]);
+
+		mdss_mdp_clk_ctrl(MDP_BLOCK_POWER_OFF);
 
 	pr_debug("MDP hw init done\n");
 
@@ -1464,6 +1473,17 @@ static int mdss_mdp_probe(struct platform_device *pdev)
 	atomic_set(&mdata->sd_client_count, 0);
 	atomic_set(&mdata->active_intf_cnt, 0);
 
+	res = platform_get_resource_byname(pdev, IORESOURCE_MEM, "mdp_phys");
+	if (!res) {
+		pr_err("unable to get MDP base address\n");
+		rc = -ENOMEM;
+		goto probe_done;
+	}
+
+	mdata->mdp_reg_size = resource_size(res);
+	mdata->mdss_base = devm_ioremap(&pdev->dev, res->start,
+				       mdata->mdp_reg_size);
+
 	mdss_res->mdss_util = mdss_get_util_intf();
 	if (mdss_res->mdss_util == NULL) {
 		pr_err("Failed to get mdss utility functions\n");
@@ -1485,6 +1505,7 @@ static int mdss_mdp_probe(struct platform_device *pdev)
 	pr_debug("MDSS HW Base addr=0x%x len=0x%x\n",
 		(int) (unsigned long) mdata->mdss_io.base,
 		mdata->mdss_io.len);
+
 
 	rc = msm_dss_ioremap_byname(pdev, &mdata->vbif_io, "vbif_phys");
 	if (rc) {
@@ -1649,6 +1670,10 @@ int mdss_mdp_parse_dt_hw_settings(struct platform_device *pdev)
 			hws, vbif_nrt_len);
 	mdss_mdp_parse_dt_regs_array(mdp_arr, &mdata->mdss_io,
 		hws + vbif_len, mdp_len);
+
+#if defined(CONFIG_FB_MSM_MDSS_SAMSUNG)
+	mdata->mdss_io.base = mdata->mdss_base;
+#endif
 
 	mdata->hw_settings = hws;
 

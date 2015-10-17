@@ -325,6 +325,7 @@ static int handle_alloc_generic_req(void *req_h, void *req)
 	rc = qmi_send_resp_from_cb(mem_share_svc_handle, curr_conn, req_h,
 			&mem_share_svc_alloc_generic_resp_desc, alloc_resp,
 			sizeof(alloc_resp));
+	kfree(alloc_resp);
 
 	if (rc < 0)
 		pr_err("In %s, Error sending the alloc request: %d\n",

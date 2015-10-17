@@ -12,6 +12,30 @@ menuconfig INPUT_KEYBOARD
 
 if INPUT_KEYBOARD
 
+config KEYBOARD_ABOV_TOUCH
+	tristate "Abov FT16XX touchkey"
+	depends on I2C
+	help
+	  Say Y here if you want to use ABOV MC96FT16XX chip as touchkey.
+
+config KEYBOARD_ABOV_TOUCH_A7
+	tristate "Abov FT16XX touchkey"
+	depends on I2C
+	help
+	  Say Y here if you want to use ABOV MC96FT16XX chip as touchkey.
+
+config KEYBOARD_ABOV_TOUCH_A3
+	tristate "Abov FT16XX touchkey"
+	depends on I2C
+	help
+	  Say Y here if you want to use ABOV MC96FT16XX chip as touchkey.
+
+config KEYBOARD_ABOV_TOUCH_A5
+	tristate "Abov FT16XX touchkey"
+	depends on I2C
+	help
+	  Say Y here if you want to use ABOV MC96FT16XX chip as touchkey.
+
 config KEYBOARD_ADP5520
 	tristate "Keypad Support for ADP5520 PMIC"
 	depends on PMIC_ADP5520
@@ -595,6 +619,17 @@ config KEYBOARD_TC3589X
 	  To compile this driver as a module, choose M here: the
 	  module will be called tc3589x-keypad.
 
+config KEYBOARD_TC360_TKEY
+	tristate "TC360 Touchkey support"
+	depends on I2C
+	help
+	  Say Y here if you want to use the keypad controller on
+	  TC360 I/O expander.
+
+	  To compile this driver as a module, choose M here: the
+	  module will be called tc360 Touchkey.
+
+	  
 config KEYBOARD_TNETV107X
 	tristate "TI TNETV107X keypad support"
 	depends on ARCH_DAVINCI_TNETV107X
@@ -668,4 +703,10 @@ config KEYBOARD_CROS_EC
 	  To compile this driver as a module, choose M here: the
 	  module will be called cros_ec_keyb.
 
+config SENSORS_HALL
+	bool "HALL"
+	depends on KEYBOARD_GPIO
+	default n
+	help
+	Say Y here to enable the HALL
 endif

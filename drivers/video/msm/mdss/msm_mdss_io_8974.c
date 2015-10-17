@@ -19,6 +19,9 @@
 
 #include "mdss_dsi.h"
 #include "mdss_edp.h"
+#if defined(CONFIG_FB_MSM_MDSS_SAMSUNG)
+#include "samsung/ss_dsi_panel_common.h"
+#endif
 
 #define SW_RESET BIT(2)
 #define SW_RESET_PLL BIT(0)
@@ -388,6 +391,16 @@ int mdss_dsi_clk_init(struct platform_device *pdev,
 	}
 
 	dev = &pdev->dev;
+#ifdef CONFIG_FB_MSM_MDSS_SAMSUNG
+	ctrl->lvds_clk = clk_get(dev, "lvds_clk");
+	if (IS_ERR(ctrl->lvds_clk)) {
+		/*	rc = PTR_ERR(ctrl->lvds_clk);*/
+		pr_err("%s: Unable to get lvds_clk clk.\n",
+			__func__);
+		ctrl->lvds_clk = NULL;
+	/*	goto mdss_dsi_clk_err;*/
+	}
+#endif
 	ctrl->mdp_core_clk = clk_get(dev, "mdp_core_clk");
 	if (IS_ERR(ctrl->mdp_core_clk)) {
 		rc = PTR_ERR(ctrl->mdp_core_clk);
@@ -553,6 +566,10 @@ mdss_dsi_shadow_clk_err:
 
 void mdss_dsi_clk_deinit(struct mdss_dsi_ctrl_pdata  *ctrl)
 {
+#if defined(CONFIG_FB_MSM_MDSS_SAMSUNG)
+	if (ctrl->lvds_clk)
+		clk_put(ctrl->lvds_clk);
+#endif
 	if (ctrl->byte_clk)
 		clk_put(ctrl->byte_clk);
 	if (ctrl->esc_clk)

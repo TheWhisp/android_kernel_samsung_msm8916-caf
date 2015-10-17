@@ -32,6 +32,14 @@
 #include "logger.h"
 
 #include <asm/ioctls.h>
+#ifdef CONFIG_SEC_DEBUG
+#include <linux/sec_debug.h>
+static char klog_buf[256];
+#endif
+
+#ifdef CONFIG_SEC_BSP
+#include <linux/sec_bsp.h>
+#endif
 
 #ifndef CONFIG_LOGCAT_SIZE
 #define CONFIG_LOGCAT_SIZE 256
@@ -86,6 +94,24 @@ struct logger_reader {
 	bool			r_all;
 	int			r_ver;
 };
+
+/**
+ * Here are the static vectors which are in action
+ * when SEC subsys debugging feature is turned on.
+ * They will capture all the userland android logs
+ * and their physicall address is passed to the subsys
+ * structure for give who needs it!
+ */
+#ifdef CONFIG_SEC_DEBUG_SUBSYS
+static struct logger_log log_main;
+static struct logger_log log_events;
+static struct logger_log log_radio;
+static struct logger_log log_system;
+static unsigned char _buf_log_main[CONFIG_LOGCAT_SIZE*1024*2]; //1MB
+static unsigned char _buf_log_events[CONFIG_LOGCAT_SIZE*1024]; //512KB
+static unsigned char _buf_log_radio[CONFIG_LOGCAT_SIZE*1024*4];  //2MB
+static unsigned char _buf_log_system[CONFIG_LOGCAT_SIZE*1024]; //512KB
+#endif
 
 /* logger_offset - returns index 'n' into the log via (optimized) modulus */
 static size_t logger_offset(struct logger_log *log, size_t n)
@@ -458,6 +484,25 @@ static ssize_t do_write_log_from_user(struct logger_log *log,
 			 * message corruption from missing fragments.
 			 */
 			return -EFAULT;
+/*
+ * This is for collecting the android userland buffer that start with !@
+ * and append it to kernel message
+ */
+#ifdef CONFIG_SEC_DEBUG
+	memset(klog_buf, 0, 255);
+	if (strncmp(log->buffer + log->w_off, "!@", 2) == 0) {
+		if (count < 255)
+			memcpy(klog_buf, log->buffer + log->w_off, count);
+		else
+			memcpy(klog_buf, log->buffer + log->w_off, 255);
+		klog_buf[255] = 0;
+#ifdef CONFIG_SEC_BSP
+		if (strncmp(klog_buf, "!@Boot",6) == 0) {
+			sec_boot_stat_add(klog_buf);
+		}
+#endif
+	}
+#endif
 
 	log->w_off = logger_offset(log, log->w_off + count);
 
@@ -529,6 +574,14 @@ static ssize_t logger_aio_write(struct kiocb *iocb, const struct iovec *iov,
 
 	/* wake up any blocked readers */
 	wake_up_interruptible(&log->wq);
+
+/**
+ * Print the android log that start with !@
+ */
+#ifdef CONFIG_SEC_DEBUG
+	if (strncmp(klog_buf, "!@", 2) == 0)
+		printk(KERN_INFO "%s\n", klog_buf);
+#endif
 
 	return ret;
 }
@@ -754,18 +807,41 @@ static int __init create_log(char *log_name, int size)
 {
 	int ret = 0;
 	struct logger_log *log;
+/*
+ * When we do not have SEC subsys, we should fall back to android's
+ * default allocator and let them handle.
+ * A bit of optimization here
+ */
+#ifndef CONFIG_SEC_DEBUG_SUBSYS
 	unsigned char *buffer;
 
 	buffer = vmalloc(size);
 	if (buffer == NULL)
 		return -ENOMEM;
-
+#endif
 	log = kzalloc(sizeof(struct logger_log), GFP_KERNEL);
 	if (log == NULL) {
 		ret = -ENOMEM;
 		goto out_free_buffer;
 	}
+/*
+ * SEC subsys feature is on, so the static vectors
+ * _buf(_log_main, _log_system, _log_events, _log_radio)
+ * should get all the android userland logs
+ * Whe this is on, android's default log collector is turned off
+ */
+#ifdef CONFIG_SEC_DEBUG_SUBSYS
+	if(strcmp(log_name,LOGGER_LOG_MAIN) == 0)
+		log->buffer = _buf_log_main;
+	else if(strcmp(log_name,LOGGER_LOG_EVENTS) == 0)
+		log->buffer = _buf_log_events;
+	else if(strcmp(log_name,LOGGER_LOG_RADIO) == 0)
+		log->buffer = _buf_log_radio;
+	else if(strcmp(log_name, LOGGER_LOG_SYSTEM) == 0)
+		log->buffer = _buf_log_system;
+#else
 	log->buffer = buffer;
+#endif
 
 	log->misc.minor = MISC_DYNAMIC_MINOR;
 	log->misc.name = kstrdup(log_name, GFP_KERNEL);
@@ -795,6 +871,17 @@ static int __init create_log(char *log_name, int size)
 		goto out_free_log;
 	}
 
+ #ifdef CONFIG_SEC_DEBUG_SUBSYS
+	if(strcmp(log_name,LOGGER_LOG_MAIN) == 0)
+		memcpy(&log_main,log,sizeof(struct logger_log));
+	else if(strcmp(log_name,LOGGER_LOG_EVENTS) == 0)
+		memcpy(&log_events,log,sizeof(struct logger_log));
+	else if(strcmp(log_name,LOGGER_LOG_RADIO) == 0)
+		memcpy(&log_radio,log,sizeof(struct logger_log));
+	else if(strcmp(log_name, LOGGER_LOG_SYSTEM) == 0)
+		memcpy(&log_system,log,sizeof(struct logger_log));
+#endif
+
 	pr_info("created %luK log '%s'\n",
 		(unsigned long) log->size >> 10, log->misc.name);
 
@@ -802,31 +889,67 @@ static int __init create_log(char *log_name, int size)
 
 out_free_log:
 	kfree(log);
-
-out_free_buffer:
+#ifndef CONFIG_SEC_DEBUG_SUBSYS
 	vfree(buffer);
+#endif
+out_free_buffer:
 	return ret;
 }
+#ifdef CONFIG_SEC_DEBUG_SUBSYS
+int sec_debug_subsys_set_logger_info(
+	struct sec_debug_subsys_logger_log_info *log_info)
+{
+	/*
+	struct secdbg_logger_log_info log_info = {
+		.stinfo = {
+			.buffer_offset = offsetof(struct logger_log, buffer),
+			.w_off_offset = offsetof(struct logger_log, w_off),
+			.head_offset = offsetof(struct logger_log, head),
+			.size_offset = offsetof(struct logger_log, size),
+			.size_t_typesize = sizeof(size_t),
+		},
+	};
+	*/
+	log_info->stinfo.buffer_offset = offsetof(struct logger_log, buffer);
+	log_info->stinfo.w_off_offset = offsetof(struct logger_log, w_off);
+	log_info->stinfo.head_offset = offsetof(struct logger_log, head);
+	log_info->stinfo.size_offset = offsetof(struct logger_log, size);
+	log_info->stinfo.size_t_typesize = sizeof(size_t);
+	log_info->main.log_paddr = __pa(&log_main);
+	log_info->main.buffer_paddr = __pa(_buf_log_main);
+	log_info->system.log_paddr = __pa(&log_system);
+	log_info->system.buffer_paddr = __pa(_buf_log_system);
+	log_info->events.log_paddr = __pa(&log_events);
+	log_info->events.buffer_paddr = __pa(_buf_log_events);
+	log_info->radio.log_paddr = __pa(&log_radio);
+	log_info->radio.buffer_paddr = __pa(_buf_log_radio);
+	return 0;
+}
+#endif
 
 static int __init logger_init(void)
 {
 	int ret;
 
-	ret = create_log(LOGGER_LOG_MAIN, CONFIG_LOGCAT_SIZE*1024);
+	ret = create_log(LOGGER_LOG_MAIN, CONFIG_LOGCAT_SIZE*1024*2); //1M
 	if (unlikely(ret))
 		goto out;
 
-	ret = create_log(LOGGER_LOG_EVENTS, CONFIG_LOGCAT_SIZE*1024);
+	ret = create_log(LOGGER_LOG_EVENTS, CONFIG_LOGCAT_SIZE*1024); //512K
 	if (unlikely(ret))
 		goto out;
 
-	ret = create_log(LOGGER_LOG_RADIO, CONFIG_LOGCAT_SIZE*1024);
+	ret = create_log(LOGGER_LOG_RADIO, CONFIG_LOGCAT_SIZE*1024*4); //2M
 	if (unlikely(ret))
 		goto out;
 
-	ret = create_log(LOGGER_LOG_SYSTEM, CONFIG_LOGCAT_SIZE*1024);
+	ret = create_log(LOGGER_LOG_SYSTEM, CONFIG_LOGCAT_SIZE*1024); //512K
 	if (unlikely(ret))
 		goto out;
+#ifdef CONFIG_SEC_DEBUG_SUBSYS
+	sec_getlog_supply_loggerinfo(_buf_log_main, _buf_log_radio,
+				     _buf_log_events, _buf_log_system);
+#endif
 
 out:
 	return ret;

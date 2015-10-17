@@ -346,6 +346,13 @@ config REGULATOR_S2MPS11
 	 via I2C bus. S2MPS11 is comprised of high efficient Buck converters
 	 including Dual-Phase Buck converter, Buck-Boost converter, various LDOs.
 
+config REGULATOR_S2MU003
+	tristate "Samsung S2MU003 voltage regulator"
+	depends on MFD_S2MU003
+	help
+	 This driver supports a Samsung Sub-PMIC S2MU003 voltage output regulator
+	 via I2C bus. S2MU003 is comprised of Buck & LDOs.
+
 config REGULATOR_S5M8767
 	tristate "Samsung S5M8767A voltage regulator"
 	depends on MFD_SEC_CORE
@@ -607,5 +614,19 @@ config REGULATOR_CPR
 	  suggestions in efuse as initial settings. It converts corner vote
 	  to voltage value before writing to a voltage regulator API, such as
 	  that provided by spm-regulator driver.
+
+config REGULATOR_RT5033
+	depends on MFD_RT5033
+	tristate "RT5033 LDO and Buck"
+	help
+	 Say y here to support the regulators found on the Richtek RT5033 I/F PMIC.
+
+config APC_CPR_QUOT_BOOST
+	bool "CPR quotient boost for APC"
+	depends on OF
+	default n
+	help
+	  Increase the CPR quotient by 50mV.
+
 endif
 

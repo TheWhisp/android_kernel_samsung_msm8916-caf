@@ -11,6 +11,8 @@
  *
  */
 
+#define __DLOG_IMPLEMENTAION_MODULE__
+
 #include <linux/delay.h>
 #include <linux/spinlock.h>
 #include <linux/ktime.h>
@@ -20,8 +22,12 @@
 #include "mdss_mdp.h"
 #include "mdss_debug.h"
 
-#define MDSS_XLOG_ENTRY	256
-#define MDSS_XLOG_MAX_DATA 6
+#if defined(CONFIG_FB_MSM_MDSS_SAMSUNG)
+#include "samsung/ss_dsi_panel_common.h" /* UTIL HEADER */
+#endif
+
+#define MDSS_XLOG_ENTRY 512
+#define MDSS_XLOG_MAX_DATA 7
 #define MDSS_XLOG_BUF_MAX 512
 
 struct tlog {
@@ -69,6 +75,9 @@ int mdss_create_xlog_debug(struct mdss_debug_data *mdd)
 		mdd->logd.xlog = NULL;
 		return -ENODEV;
 	}
+
+	mdd->logd.xlog_enable = true;
+
 	debugfs_create_file("dump", 0644, mdd->logd.xlog, NULL,
 						&mdss_xlog_fops);
 	debugfs_create_bool("enable", 0644, mdd->logd.xlog,
@@ -164,10 +173,20 @@ void mdss_xlog_tout_handler(const char *name, ...)
 	int i, dead = 0;
 	va_list args;
 	char *blk_name = NULL;
+#if defined(CONFIG_FB_MSM_MDSS_SAMSUNG)
+	char *dsi0_addr = NULL;
+	char *dsi1_addr = NULL;
+#endif
 
 	if (!mdd->logd.xlog_enable)
 		return;
 
+#if defined(CONFIG_FB_MSM_MDSS_SAMSUNG)
+	if (!strcmp(name, "mdss_mdp_video_underrun_intr_done")) {
+		mdss_mdp_underrun_dump_info();
+		return;
+	}
+#endif
 	va_start(args, name);
 	for (i = 0; i < MDSS_XLOG_MAX_DATA; i++) {
 
@@ -185,6 +204,13 @@ void mdss_xlog_tout_handler(const char *name, ...)
 				mdss_dump_reg(blk_base->base,
 						blk_base->max_offset);
 			}
+#if defined(CONFIG_FB_MSM_MDSS_SAMSUNG)
+			if (!strncmp(blk_base->name, "dsi0", 4))
+				dsi0_addr = blk_base->base;
+
+			if (!strncmp(blk_base->name, "dsi1", 4))
+				dsi1_addr = blk_base->base;
+#endif
 		}
 		if (!strcmp(blk_name, "panic"))
 			dead = 1;
@@ -193,6 +219,23 @@ void mdss_xlog_tout_handler(const char *name, ...)
 
 	MDSS_XLOG(0xffff, 0xffff, 0xffff, 0xffff, 0xffff);
 	mdss_xlog_dump();
+
+#if defined(CONFIG_FB_MSM_MDSS_SAMSUNG)
+	mdss_samsung_dump_regs();
+
+	if (dsi0_addr)
+		mdss_samsung_dsi_dump_regs(0);
+
+	if (dsi1_addr)
+		mdss_samsung_dsi_dump_regs(1);
+
+	mdss_samsung_dsi_te_check();
+
+	mdss_mdp_underrun_dump_info();
+
+	if (dead)
+		panic(name);
+#endif
 
 	if (dead && mdd->logd.panic_on_err)
 		panic(name);

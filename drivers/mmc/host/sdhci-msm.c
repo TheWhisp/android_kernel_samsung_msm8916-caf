@@ -2127,6 +2127,8 @@ static irqreturn_t sdhci_msm_sdiowakeup_irq(int irq, void *data)
 	return IRQ_HANDLED;
 }
 
+void sdhci_dumpregs(struct sdhci_host *host);
+static int sdhci_msm_enable_controller_clock(struct sdhci_host *host);
 static irqreturn_t sdhci_msm_pwr_irq(int irq, void *data)
 {
 	struct sdhci_host *host = (struct sdhci_host *)data;
@@ -2138,9 +2140,21 @@ static irqreturn_t sdhci_msm_pwr_irq(int irq, void *data)
 	int pwr_state = 0, io_level = 0;
 	unsigned long flags;
 
+	if (!IS_ERR(msm_host->pclk)) {
+		ret = clk_prepare_enable(msm_host->pclk);
+		if (ret)
+			pr_err("%s: %s: failed to enable the pclk with error %d\n",
+				mmc_hostname(host->mmc), __func__, ret);
+	}
+
 	irq_status = readb_relaxed(msm_host->core_mem + CORE_PWRCTL_STATUS);
 	pr_debug("%s: Received IRQ(%d), status=0x%x\n",
 		mmc_hostname(msm_host->mmc), irq, irq_status);
+
+	if ((irq_status & msm_host->curr_pwr_state) ||
+		(irq_status & msm_host->curr_io_level))
+		pr_err("spurious IRQ 0x%x pwr_ctrl_reg 0x%x\n", irq_status,
+			readl_relaxed(msm_host->core_mem + CORE_PWRCTL_CTL));
 
 	/* Clear the interrupt */
 	writeb_relaxed(irq_status, (msm_host->core_mem + CORE_PWRCTL_CLEAR));
@@ -2234,6 +2248,9 @@ static irqreturn_t sdhci_msm_pwr_irq(int irq, void *data)
 		msm_host->curr_io_level = io_level;
 	complete(&msm_host->pwr_irq_completion);
 	spin_unlock_irqrestore(&host->lock, flags);
+
+	if (!IS_ERR(msm_host->pclk)) 
+		clk_disable_unprepare(msm_host->pclk);
 
 	return IRQ_HANDLED;
 }
@@ -2890,6 +2907,33 @@ void sdhci_msm_dump_vendor_regs(struct sdhci_host *host)
 	/* Disable test bus */
 	writel_relaxed(~CORE_TESTBUS_ENA, msm_host->core_mem +
 			CORE_TESTBUS_CONFIG);
+
+	pr_info("PWRCTL_STATUS: 0x%08x | PWRCTL_MASK: 0x%08x | PWRCTL_CTL: 0x%08x\n",
+			readl_relaxed(msm_host->core_mem + CORE_PWRCTL_STATUS),
+			readl_relaxed(msm_host->core_mem + CORE_PWRCTL_MASK),
+			readl_relaxed(msm_host->core_mem + CORE_PWRCTL_CTL));
+
+	pr_info("-------- MCI Registers -------- \n");
+
+	for(i = 0;i < 0x1C0;i+=16) {
+		pr_info("0x%08X: 0x%08X 0x%08X 0x%08X 0x%08X\n",
+				i,
+				readl_relaxed(msm_host->core_mem + i),
+				readl_relaxed(msm_host->core_mem + i + 4),
+				readl_relaxed(msm_host->core_mem + i + 8),
+				readl_relaxed(msm_host->core_mem + i + 12));
+	}
+
+	pr_info("-------- HC Registers -------- \n");
+
+	for(i = 0;i < 0x1C0 ;i+=16) {
+		pr_info("0x%08X: 0x%08X 0x%08X 0x%08X 0x%08X\n",
+				i,
+				readl_relaxed(host->ioaddr + i),
+				readl_relaxed(host->ioaddr + i + 4),
+				readl_relaxed(host->ioaddr + i + 8),
+				readl_relaxed(host->ioaddr + i + 12));
+	}
 }
 
 static struct sdhci_ops sdhci_msm_ops = {
@@ -2991,6 +3035,46 @@ static void sdhci_set_default_hw_caps(struct sdhci_msm_host *msm_host,
 	caps &= ~CORE_SYS_BUS_SUPPORT_64_BIT;
 	writel_relaxed(caps, host->ioaddr + CORE_VENDOR_SPEC_CAPABILITIES0);
 }
+
+/* SYSFS about SD Card Detection */
+extern struct class *sec_class;
+static struct device *t_flash_detect_dev;
+
+static ssize_t t_flash_detect_show(struct device *dev,
+		struct device_attribute *attr, char *buf)
+{
+	struct sdhci_msm_host *msm_host = dev_get_drvdata(dev);
+#if (defined(CONFIG_NO_DETECT_PIN) || defined(CONFIG_SEC_HYBRID_TRAY))
+	if (msm_host->mmc->card) {
+		printk(KERN_DEBUG "sdcc2: card inserted.\n");
+		return sprintf(buf, "Insert\n");
+	} else {
+		printk(KERN_DEBUG "sdcc2: card removed.\n");
+		return sprintf(buf, "Remove\n");
+	}
+#else
+	unsigned int detect;
+
+	if (gpio_is_valid(msm_host->pdata->status_gpio))
+		detect = gpio_get_value(msm_host->pdata->status_gpio);
+
+	else {
+		pr_info("%s : External  SD detect pin Error\n", __func__);
+		return sprintf(buf, "Error\n");
+	}
+
+	pr_info("%s : detect = %d.\n", __func__, detect);
+	if (!detect) {
+		printk(KERN_DEBUG "SD card inserted.\n");
+		return sprintf(buf, "Insert\n");
+	} else {
+		printk(KERN_DEBUG "SD card removed.\n");
+		return sprintf(buf, "Remove\n");
+	}
+#endif
+}
+
+static DEVICE_ATTR(status, 0444, t_flash_detect_show, NULL);
 
 static int sdhci_msm_probe(struct platform_device *pdev)
 {
@@ -3253,14 +3337,14 @@ static int sdhci_msm_probe(struct platform_device *pdev)
 	msm_host->mmc->caps |= msm_host->pdata->mmc_bus_width;
 	msm_host->mmc->caps |= msm_host->pdata->caps;
 	msm_host->mmc->caps2 |= msm_host->pdata->caps2;
-	msm_host->mmc->caps2 |= MMC_CAP2_CORE_RUNTIME_PM;
-	msm_host->mmc->caps2 |= MMC_CAP2_PACKED_WR;
-	msm_host->mmc->caps2 |= MMC_CAP2_PACKED_WR_CONTROL;
+	//msm_host->mmc->caps2 |= MMC_CAP2_CORE_RUNTIME_PM;
+	//msm_host->mmc->caps2 |= MMC_CAP2_PACKED_WR;
+	//msm_host->mmc->caps2 |= MMC_CAP2_PACKED_WR_CONTROL;
 	msm_host->mmc->caps2 |= (MMC_CAP2_BOOTPART_NOACC |
 				MMC_CAP2_DETECT_ON_ERR);
 	msm_host->mmc->caps2 |= MMC_CAP2_CACHE_CTRL;
 	msm_host->mmc->caps2 |= MMC_CAP2_POWEROFF_NOTIFY;
-	msm_host->mmc->caps2 |= MMC_CAP2_CLK_SCALE;
+	//msm_host->mmc->caps2 |= MMC_CAP2_CLK_SCALE;
 	msm_host->mmc->caps2 |= MMC_CAP2_STOP_REQUEST;
 	msm_host->mmc->caps2 |= MMC_CAP2_ASYNC_SDIO_IRQ_4BIT_MODE;
 	msm_host->mmc->pm_caps |= MMC_PM_KEEP_POWER | MMC_PM_WAKE_SDIO_IRQ;
@@ -3284,7 +3368,7 @@ static int sdhci_msm_probe(struct platform_device *pdev)
 		 * weird/inconsistent state resulting in flood of interrupts.
 		 */
 		sdhci_msm_setup_pins(msm_host->pdata, true);
-
+		mdelay(10);
 		ret = mmc_gpio_request_cd(msm_host->mmc,
 				msm_host->pdata->status_gpio);
 		if (ret) {
@@ -3292,6 +3376,26 @@ static int sdhci_msm_probe(struct platform_device *pdev)
 					__func__, ret);
 			goto vreg_deinit;
 		}
+	}
+	/* SYSFS about SD Card Detection by soonil.lim */
+#if (defined(CONFIG_NO_DETECT_PIN) || defined(CONFIG_MACH_KLEOS_EUR))
+	if (t_flash_detect_dev == NULL && !strcmp(host->hw_name, "7864900.sdhci")) {
+#else
+	if (t_flash_detect_dev == NULL && gpio_is_valid(msm_host->pdata->status_gpio)) {
+#endif
+		printk(KERN_DEBUG "%s : Change sysfs Card Detect\n", __func__);
+
+		t_flash_detect_dev = device_create(sec_class,
+				NULL, 0, NULL, "sdcard");
+		if (IS_ERR(t_flash_detect_dev))
+			pr_err("%s : Failed to create device!\n", __func__);
+
+		if (device_create_file(t_flash_detect_dev,
+			&dev_attr_status) < 0)
+			pr_err("%s : Failed to create device file(%s)!\n",
+					__func__, dev_attr_status.attr.name);
+
+		dev_set_drvdata(t_flash_detect_dev, msm_host);
 	}
 
 	if ((sdhci_readl(host, SDHCI_CAPABILITIES) & SDHCI_CAN_64BIT) &&

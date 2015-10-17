@@ -264,6 +264,8 @@
 #define   SDHCI_SPEC_200	1
 #define   SDHCI_SPEC_300	2
 
+#define HC_VENDOR_SPEC_PWR_REG 0x1AC
+
 /*
  * End of controller registers.
  */

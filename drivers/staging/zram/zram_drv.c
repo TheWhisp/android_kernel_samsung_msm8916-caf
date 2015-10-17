@@ -68,13 +68,11 @@ static int zram_show_mem_notifier(struct notifier_block *nb,
 
 		if (zram->init_done) {
 			u64 val;
-			u64 data_size;
 
-			val = zs_get_total_size_bytes(meta->mem_pool);
-			data_size = atomic64_read(&zram->stats.compr_size);
-			pr_info("Zram[%d] mem_used_total = %llu\n", i, val);
+			val = zs_get_total_pages(meta->mem_pool);
+			pr_info("Zram[%d] mem_used_total = %llu\n", i, val << PAGE_SHIFT);
 			pr_info("Zram[%d] compr_data_size = %llu\n", i,
-				(unsigned long long)data_size);
+				atomic64_read(&zram->stats.compr_size));
 			pr_info("Zram[%d] orig_data_size = %u\n", i,
 				zram->stats.pages_stored);
 		}
@@ -181,10 +179,10 @@ static ssize_t mem_used_total_show(struct device *dev,
 
 	down_read(&zram->init_lock);
 	if (zram->init_done)
-		val = zs_get_total_size_bytes(meta->mem_pool);
+		val = zs_get_total_pages(meta->mem_pool);
 	up_read(&zram->init_lock);
 
-	return sprintf(buf, "%llu\n", val);
+	return sprintf(buf, "%llu\n", val << PAGE_SHIFT);
 }
 
 static int zram_test_flag(struct zram_meta *meta, u32 index,
@@ -269,7 +267,7 @@ static struct zram_meta *zram_meta_alloc(u64 disksize)
 	}
 
 	meta->mem_pool = zs_create_pool(GFP_NOIO | __GFP_HIGHMEM |
-					__GFP_NOWARN);
+					__GFP_NOWARN, NULL);
 	if (!meta->mem_pool) {
 		pr_err("Error creating memory pool\n");
 		goto free_table;

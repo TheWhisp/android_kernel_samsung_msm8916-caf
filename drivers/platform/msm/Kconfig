@@ -54,6 +54,15 @@ config QPNP_POWER_ON
 	  PNP PMIC. It currently supports reporting the change in status of
 	  the KPDPWR_N line (connected to the power-key).
 
+config QPNP_RESIN
+	bool "QPNP support RESIN"
+	depends on QPNP_POWER_ON
+	default n
+	help
+	  This supports the resin functionality on Qualcomm PNP PMIC.
+	  It supports reporting the change in status of the RESIN line
+	  (connected to the volume down key).
+
 config QPNP_CLKDIV
 	tristate "QPNP PMIC clkdiv driver"
 	depends on OF_SPMI && SPMI

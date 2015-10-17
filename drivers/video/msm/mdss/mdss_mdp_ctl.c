@@ -688,8 +688,7 @@ static void mdss_mdp_perf_calc_mixer(struct mdss_mdp_mixer *mixer,
 			perf->bw_overlap =
 				fps * mixer->width * mixer->height * 3;
 		/* for command mode, run as fast as the link allows us */
-		else if ((pinfo->type == MIPI_CMD_PANEL) &&
-			 (pinfo->mipi.dsi_pclk_rate > perf->mdp_clk_rate))
+		else if (pinfo->mipi.dsi_pclk_rate > perf->mdp_clk_rate)
 			perf->mdp_clk_rate = pinfo->mipi.dsi_pclk_rate;
 	}
 
@@ -2907,6 +2906,10 @@ int mdss_mdp_ctl_addr_setup(struct mdss_data_type *mdata,
 			head[i].wb_base = (mdata->mdss_io.base) +
 				wb_offsets[i - offset];
 		head[i].ref_cnt = 0;
+#if defined(CONFIG_FB_MSM_MDSS_SAMSUNG)
+		head[i].physical_base = ctl_offsets[i];
+#endif
+
 	}
 
 	if (mdata->wfd_mode == MDSS_MDP_WFD_SHARED) {
@@ -3246,6 +3249,9 @@ int mdss_mdp_display_commit(struct mdss_mdp_ctl *ctl, void *arg,
 	bool is_bw_released;
 	int split_enable;
 
+#if defined(CONFIG_FB_MSM_MDSS_SAMSUNG)
+	struct mdss_overlay_private *mdp5_data = NULL;
+#endif
 	if (!ctl) {
 		pr_err("display function not set\n");
 		return -ENODEV;
@@ -3381,6 +3387,31 @@ int mdss_mdp_display_commit(struct mdss_mdp_ctl *ctl, void *arg,
 	wmb();
 	ctl->flush_reg_data = ctl->flush_bits;
 	ctl->flush_bits = 0;
+
+#if defined(CONFIG_FB_MSM_MDSS_SAMSUNG)
+	if(ctl->mfd)
+		mdp5_data = mfd_to_mdp5_data(ctl->mfd);
+
+	if (mdp5_data) {
+		if (csc_change == 1) {
+			struct mdss_mdp_pipe *pipe, *next;
+			mutex_lock(&mdp5_data->list_lock);
+			list_for_each_entry_safe(pipe, next, &mdp5_data->pipes_used, list) {
+				if (pipe->type == MDSS_MDP_PIPE_TYPE_VIG) {
+					mdss_mdp_irq_enable(MDSS_MDP_IRQ_PING_PONG_COMP, ctl->num);
+					if (ctl->wait_video_pingpong) {
+						ctl->wait_video_pingpong(ctl, NULL);
+					}
+					pr_info(" mdss_mdp_csc_setup start\n");
+					mdss_mdp_csc_setup(MDSS_MDP_BLOCK_SSPP, pipe->num,
+									MDSS_MDP_CSC_YUV2RGB);
+					csc_change = 0;
+				}
+			}
+			mutex_unlock(&mdp5_data->list_lock);
+		}
+	}
+#endif
 
 	if (sctl && !ctl->valid_roi && sctl->valid_roi) {
 		/*

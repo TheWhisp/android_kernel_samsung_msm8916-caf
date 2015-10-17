@@ -715,7 +715,11 @@ void mdss_mdp_data_free(struct mdss_mdp_data *data)
 	int i;
 
 	for (i = 0; i < data->num_planes && data->p[i].len; i++)
+	{
+		mdss_iommu_ctrl(1);
 		mdss_mdp_put_img(&data->p[i]);
+		mdss_iommu_ctrl(0);
+	}
 
 	data->num_planes = 0;
 }

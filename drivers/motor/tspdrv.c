@@ -183,7 +183,7 @@ static int get_time_for_vibetonz(struct timed_output_dev *dev)
 
 static void enable_vibetonz_from_user(struct timed_output_dev *dev, int value)
 {
-	printk(KERN_DEBUG "tspdrv: Enable time = %d msec\n", value);
+	//printk(KERN_DEBUG "tspdrv: Enable time = %d msec\n", value);
 	hrtimer_cancel(&timer);
 
 	/* set_vibetonz(value); */
@@ -218,10 +218,32 @@ static void vibetonz_start(void)
 	timer.function = vibetonz_timer_func;
 
 	ret = timed_output_dev_register(&timed_output_vt);
-
-	if (ret)
+	if (ret < 0)
 		DbgOut((KERN_ERR
-		"tspdrv: timed_output_dev_register is fail\n"));
+		"tspdrv: timed_output_dev_register fail\n"));
+        ret = device_create_file(timed_output_vt.dev, &dev_attr_pwm_value);
+	if (ret < 0)
+	DbgOut((KERN_ERR
+				"tspdrv: device_create_file fail: pwm_value\n"));
+		    ret = device_create_file(timed_output_vt.dev, &dev_attr_pwm_max);
+			if (ret < 0) {
+				pr_err("vibrator_init(): create sysfs fail: pwm_max\n");
+			}
+		    
+			ret = device_create_file(timed_output_vt.dev, &dev_attr_pwm_min);
+			if (ret < 0) {
+				pr_err("vibrator_init(): create sysfs fail: pwm_min\n");
+			}
+		    
+			ret = device_create_file(timed_output_vt.dev, &dev_attr_pwm_default);
+			if (ret < 0) {
+				pr_err("vibrator_init(): create sysfs fail: pwm_default\n");
+			}
+		    
+			ret = device_create_file(timed_output_vt.dev, &dev_attr_pwm_threshold);
+			if (ret < 0) {
+				pr_err("vibrator_init(): create sysfs fail: pwm_threshold\n");
+			}
 }
 
 /* File IO */

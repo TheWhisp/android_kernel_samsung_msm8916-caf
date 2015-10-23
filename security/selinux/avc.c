@@ -58,6 +58,14 @@ struct avc_node {
 	struct rcu_head		rhead;
 };
 
+struct avc_cache {
+	struct hlist_head	slots[AVC_CACHE_SLOTS]; /* head for avc_node->list */
+	spinlock_t		slots_lock[AVC_CACHE_SLOTS]; /* lock for writes */
+	atomic_t		lru_hint;	/* LRU hint for reclaim scan */
+	atomic_t		active_nodes;
+	u32			latest_notif;	/* latest revocation notification */
+};
+
 struct avc_operation_decision_node {
 	struct operation_decision od;
 	struct list_head od_list;
@@ -66,14 +74,6 @@ struct avc_operation_decision_node {
 struct avc_operation_node {
 	struct operation ops;
 	struct list_head od_head; /* list of operation_decision_node */
-};
-
-struct avc_cache {
-	struct hlist_head	slots[AVC_CACHE_SLOTS]; /* head for avc_node->list */
-	spinlock_t		slots_lock[AVC_CACHE_SLOTS]; /* lock for writes */
-	atomic_t		lru_hint;	/* LRU hint for reclaim scan */
-	atomic_t		active_nodes;
-	u32			latest_notif;	/* latest revocation notification */
 };
 
 struct avc_callback_node {
@@ -475,6 +475,22 @@ static inline u32 avc_operation_audit_required(u32 requested,
 	return audited;
 }
 
+static inline int avc_operation_audit(u32 ssid, u32 tsid, u16 tclass,
+				u32 requested, struct av_decision *avd,
+				struct operation_decision *od,
+				u16 cmd, int result,
+				struct common_audit_data *ad)
+{
+	u32 audited, denied;
+
+	audited = avc_operation_audit_required(
+			requested, avd, od, cmd, result, &denied);
+	if (likely(!audited))
+		return 0;
+	return slow_avc_audit(ssid, tsid, tclass, requested,
+			audited, denied, result, ad, 0);
+}
+
 static void avc_node_free(struct rcu_head *rhead)
 {
 	struct avc_node *node = container_of(rhead, struct avc_node, rhead);
@@ -769,21 +785,6 @@ noinline int slow_avc_audit(u32 ssid, u32 tsid, u16 tclass,
 	return 0;
 }
 
-static inline int avc_operation_audit(u32 ssid, u32 tsid, u16 tclass,
-				u32 requested, struct av_decision *avd,
-				struct operation_decision *od,
-				u16 cmd, int result,
-				struct common_audit_data *ad)
-{
-	u32 audited, denied;
-	audited = avc_operation_audit_required(
-			requested, avd, od, cmd, result, &denied);
-	if (likely(!audited))
-		return 0;
-	return slow_avc_audit(ssid, tsid, tclass, requested,
-			      audited, denied, result, ad, 0);
-}
-
 /**
  * avc_add_callback - Register a callback for security events.
  * @callback: callback function
@@ -981,12 +982,14 @@ int avc_ss_reset(u32 seqno)
  * results in a bigger stack frame.
  */
 static noinline struct avc_node *avc_compute_av(u32 ssid, u32 tsid,
-			 u16 tclass, struct av_decision *avd)
+			 u16 tclass, struct av_decision *avd,
+			 struct avc_operation_node *ops_node)
 {
 	rcu_read_unlock();
-	security_compute_av(ssid, tsid, tclass, avd);
+	INIT_LIST_HEAD(&ops_node->od_head);
+	security_compute_av(ssid, tsid, tclass, avd, &ops_node->ops);
 	rcu_read_lock();
-	return avc_insert(ssid, tsid, tclass, avd);
+	return avc_insert(ssid, tsid, tclass, avd, ops_node);
 }
 
 static noinline int avc_denied(u32 ssid, u32 tsid,

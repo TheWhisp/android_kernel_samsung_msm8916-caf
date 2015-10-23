@@ -18,3 +18,4 @@ void services_compute_operation_num(struct operation_decision *od,
 					struct avtab_node *node);
 
 #endif	/* _SS_SERVICES_H_ */
+

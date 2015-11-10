@@ -975,7 +975,7 @@ int /* __init */ f_midi_bind_config(struct usb_configuration *c,
 	midi->id = kstrdup(id, GFP_KERNEL);
 	midi->index = index;
 	midi->buflen = buflen;
-	midi->qlen = qlen
+	midi->qlen = qlen;
 	midi->in_ports = in_ports;
 	midi->out_ports = out_ports;
 	status = f_midi_register_card(midi);

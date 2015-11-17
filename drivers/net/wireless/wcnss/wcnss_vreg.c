@@ -270,10 +270,6 @@ configure_iris_xo(struct device *dev,
 	struct clk *clk_rf = NULL;
 	bool use_48mhz_xo;
 
-        struct wcnss_wlan_config *cfg = NULL;
-
-        cfg = wcnss_get_wlan_config();
-
 	use_48mhz_xo = cfg->use_48mhz_xo;
 
 	if (wcnss_hardware_type() == WCNSS_PRONTO_HW) {

@@ -1102,7 +1102,12 @@ config TOUCHSCREEN_MMS300_A
 
           To compile this driver as a module, choose M here: the
           module will be called mms300 series.
-          
+
+config TOUCHSCREEN_MMS300A_WAKE_GESTURE
+        bool "Wake gestures interface for Melfas MMS300_A touchscreen"
+        depends on TOUCHSCREEN_MMS300_A
+        default y
+
 source "drivers/input/touchscreen/stm_fts/Kconfig"
 source "drivers/input/touchscreen/mxt_t/Kconfig"
 source "drivers/input/touchscreen/cyttsp5/Kconfig"

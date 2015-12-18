@@ -23,7 +23,7 @@
 /* #define ESD_DEBUG */
 #define DEBUG_PRINT2			1
 
-#define TSP_GESTURE_MODE	
+#define TSP_GESTURE_MODE
 
 #define SEC_TSP_FACTORY_TEST
 #define TSP_BUF_SIZE 1024
@@ -1317,6 +1317,8 @@ static irqreturn_t mms_ts_interrupt(int irq, void *dev_id)
 					msleep(10);
 					input_report_key(info->input_dev, KEY_POWER, 0);
 					input_sync(info->input_dev);
+
+					disable_irq_wake(info->irq);
 				}
 				oldJiffies = newJiffies;
 			}
@@ -6144,7 +6146,7 @@ static int mms_ts_suspend(struct device *dev)
 #ifdef CONFIG_TOUCHSCREEN_MMS300A_WAKE_GESTURE
 	if(info->wake_gesture_enabled == 1) {
 		info->ts_control = 0;
-		pr_info("mms300: Wake gesture enabled, don't suspend\n");
+		enable_irq_wake(info->irq);
 		return 0;
 	}
 #endif
@@ -6188,6 +6190,11 @@ static int mms_ts_resume(struct device *dev)
 {
 	struct i2c_client *client = to_i2c_client(dev);
 	struct mms_ts_info *info = i2c_get_clientdata(client);
+
+#ifdef CONFIG_TOUCHSCREEN_MMS300A_WAKE_GESTURE
+	if(info->wake_gesture_enabled == 1 && info->ts_control != 0)
+		disable_irq_wake(info->irq);
+#endif
 
 	if (info->enabled)
 		return 0;

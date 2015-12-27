@@ -1309,7 +1309,7 @@ static irqreturn_t mms_ts_interrupt(int irq, void *dev_id)
 		if(!info->ts_control) { // don't register the gesture if the device is already awake
 			if(info->wake_gesture_enabled == 1 && info->finger_state[id] == 0 && id == 0) {
 				unsigned long newJiffies = jiffies;
-				if((newJiffies - oldJiffies) > 10 && (newJiffies - oldJiffies) < 150) {
+				if((newJiffies - oldJiffies) > 10 && (newJiffies - oldJiffies) < 75) {
 					info->ts_control = 1;
 					pr_info("mms300: wake gesture\n");
 					input_report_key(info->input_dev, KEY_POWER, 1);

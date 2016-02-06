@@ -1312,10 +1312,10 @@ static irqreturn_t mms_ts_interrupt(int irq, void *dev_id)
 				if((newJiffies - oldJiffies) > 10 && (newJiffies - oldJiffies) < 75) {
 					info->ts_control = 1;
 					pr_info("mms300: wake gesture\n");
-					input_report_key(info->input_dev, KEY_POWER, 1);
+					input_report_key(info->input_dev, KEY_WAKEUP, 1);
 					input_sync(info->input_dev);
 					msleep(10);
-					input_report_key(info->input_dev, KEY_POWER, 0);
+					input_report_key(info->input_dev, KEY_WAKEUP, 0);
 					input_sync(info->input_dev);
 
 					disable_irq_wake(info->irq);
@@ -5859,7 +5859,7 @@ static int mms_ts_probe(struct i2c_client *client,
 #endif
 
 #ifdef CONFIG_TOUCHSCREEN_MMS300A_WAKE_GESTURE
-	set_bit(KEY_POWER, info->input_dev->keybit);
+	set_bit(KEY_WAKEUP, info->input_dev->keybit);
 #endif
 
 #ifdef TSP_GESTURE_MODE

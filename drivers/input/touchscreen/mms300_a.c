@@ -1030,6 +1030,7 @@ static irqreturn_t mms_ts_interrupt(int irq, void *dev_id)
 
 #ifdef CONFIG_TOUCHSCREEN_MMS300A_WAKE_GESTURE
 	static unsigned long oldJiffies = 0;
+	static int oldY = 0, oldX = 0;
 #endif
 
 	struct i2c_msg msg[] = {
@@ -1310,23 +1311,36 @@ static irqreturn_t mms_ts_interrupt(int irq, void *dev_id)
 			if(info->wake_gesture_enabled == 1 && info->finger_state[id] == 0 && id == 0) {
 				unsigned long newJiffies = jiffies;
 				if((newJiffies - oldJiffies) > 10 && (newJiffies - oldJiffies) < 75) {
-					info->ts_control = 1;
-					pr_info("mms300: wake gesture\n");
-					input_report_key(info->input_dev, KEY_WAKEUP, 1);
-					input_sync(info->input_dev);
-					msleep(10);
-					input_report_key(info->input_dev, KEY_WAKEUP, 0);
-					input_sync(info->input_dev);
 
-					disable_irq_wake(info->irq);
+					// Check the distance
+					int diffX = (x > oldX) ? (x - oldX) : (oldX - x);
+					int diffY = (y > oldY) ? (y - oldY) : (oldY - y);
+
+					if((diffX >= 0 && diffX <= 25) && (diffY >= 0 && diffY <= 25)) {
+						info->ts_control = 1;
+						pr_info("mms300: wake gesture\n");
+						pr_info("mms300: Old x %d and y %d, new x %d and y %d\n", oldX, oldY, x, y);
+						input_report_key(info->input_dev, KEY_WAKEUP, 1);
+						input_sync(info->input_dev);
+						msleep(10);
+						input_report_key(info->input_dev, KEY_WAKEUP, 0);
+						input_sync(info->input_dev);
+
+						disable_irq_wake(info->irq);
+					} else {
+						pr_info("mms300: ignore wake, taps too distant\n");
+					} 
 				}
+
 				oldJiffies = newJiffies;
+				oldX = x;
+				oldY = y;
 			}
 		}
 #endif
 
 #ifdef CONFIG_SAMSUNG_PRODUCT_SHIP
-		if (info->finger_state[id] == 0) {
+		if (info->finger_state[id] == 0) { 
 			info->finger_state[id] = 1;
 			touch_is_pressed++;
 			dev_notice(&client->dev,

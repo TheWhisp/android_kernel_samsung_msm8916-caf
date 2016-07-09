@@ -143,6 +143,7 @@ struct abov_tk_info {
 	int force_disable;
 };
 
+#define BUF_SIZE PAGE_SIZE
 
 static int abov_tk_input_open(struct input_dev *dev);
 static void abov_tk_input_close(struct input_dev *dev);

@@ -147,6 +147,11 @@ bool sec_get_param(enum sec_param_index index, void *value)
 		memcpy(value, &(param_data->param_restart_reason), sizeof(unsigned int));
 		break;
 #endif
+#ifdef CONFIG_BARCODE_PAINTER
+	case param_index_barcode_info:
+		memcpy(value, param_data->param_barcode_info, sizeof(param_data->param_barcode_info));
+		break;
+#endif
 	default:
 		return false;
 	}
@@ -211,6 +216,12 @@ bool sec_set_param(enum sec_param_index index, void *value)
 	case param_index_restart_reason:
 		memcpy(&(param_data->param_restart_reason),
 				value, sizeof(unsigned int));
+		break;
+#endif
+#ifdef CONFIG_BARCODE_PAINTER
+	case param_index_barcode_info:
+		memcpy(param_data->param_barcode_info,
+				value, sizeof(param_data->param_barcode_info));
 		break;
 #endif
 	default:

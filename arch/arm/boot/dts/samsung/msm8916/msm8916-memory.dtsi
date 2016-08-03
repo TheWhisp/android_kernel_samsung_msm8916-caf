@@ -17,14 +17,6 @@
 		#address-cells = <2>;
 		#size-cells = <2>;
 
-		pstore_reserve_mem: pstore_reserve_mem_region@0 {
-			linux,reserve-contiguous-region;
-			linux,reserve-region;
-			linux,remove-completely;
-			reg = <0x0 0x9ff00000 0x0 0x00100000>;
-			label = "pstore_reserve_mem";
-		};
-
 /* Additionally Reserved 6MB for TIMA and Increased the TZ app size
  * by 2MB [total 8 MB ]
  */
@@ -78,10 +70,10 @@
 			label = "audio_mem";
 		};
 
-		cont_splash_mem: splash_region@83000000 {
+		cont_splash_mem: splash_region@8E000000 {
 			linux,reserve-contiguous-region;
 			linux,reserve-region;
-			reg = <0x0 0x83000000 0x0 0x1400000>;
+			reg = <0x0 0x8E000000 0x0 0x1400000>;
 			label = "cont_splash_mem";
 		};
 	};

@@ -54,6 +54,7 @@
 #define AC3_OUTPUT_FRAME_SZ		1536
 #define EAC3_OUTPUT_FRAME_SZ		1536
 #define DSP_NUM_OUTPUT_FRAME_BUFFERED	2
+#define FLAC_BLK_SIZE_LIMIT		65535
 
 /* decoder parameter length */
 #define DDP_DEC_MAX_NUM_PARAM		18
@@ -86,6 +87,8 @@ struct msm_compr_gapless_state {
 	int32_t stream_opened[MAX_NUMBER_OF_STREAMS];
 	uint32_t initial_samples_drop;
 	uint32_t trailing_samples_drop;
+	uint32_t min_blk_size;
+	uint32_t max_blk_size;
 	uint32_t gapless_transition;
 	bool use_dsp_gapless_mode;
 };
@@ -161,6 +164,11 @@ struct msm_compr_audio {
 };
 
 const u32 compr_codecs[] = {SND_AUDIOCODEC_AC3, SND_AUDIOCODEC_EAC3};
+
+static unsigned int supported_sample_rates[] = {
+	8000, 11025, 12000, 16000, 22050, 24000, 32000, 44100, 48000, 64000,
+	88200, 96000, 176400, 192000
+};
 
 struct msm_compr_audio_effects {
 	struct bass_boost_params bass_boost;
@@ -332,7 +340,16 @@ static void compr_event_handler(uint32_t opcode,
 			       payload[3],
 			       payload[0],
 				prtd->byte_offset, prtd->copied_total, token);
-			atomic_set(&prtd->start, 0);
+
+			if (atomic_read(&prtd->drain) && prtd->last_buffer) {
+				pr_debug("wake up on drain\n");
+				prtd->drain_ready = 1;
+				wake_up(&prtd->drain_wait);
+				atomic_set(&prtd->drain, 0);
+				prtd->last_buffer = 0;
+			} else {
+				atomic_set(&prtd->start, 0);
+			}
 		} else {
 			pr_debug("ASM_DATA_EVENT_WRITE_DONE_V2 offset %d, length %d\n",
 				 prtd->byte_offset, token);
@@ -995,6 +1012,8 @@ static int msm_compr_open(struct snd_compr_stream *cstream)
 	prtd->partial_drain_delay = 0;
 	prtd->next_stream = 0;
 	memset(&prtd->gapless_state, 0, sizeof(struct msm_compr_gapless_state));
+	prtd->gapless_state.min_blk_size = 65537;
+	prtd->gapless_state.max_blk_size = 65537;
 	/*
 	 * Update the use_dsp_gapless_mode from gapless struture with the value
 	 * part of platform data.
@@ -1150,56 +1169,17 @@ static int msm_compr_set_params(struct snd_compr_stream *cstream,
 {
 	struct snd_compr_runtime *runtime = cstream->runtime;
 	struct msm_compr_audio *prtd = runtime->private_data;
-	int ret = 0, frame_sz = 0, delay_time_ms = 0;
+	int ret = 0, frame_sz = 0, delay_time_ms;
+	int i, num_rates;
 
 	pr_debug("%s\n", __func__);
 
-	memcpy(&prtd->codec_param, params, sizeof(struct snd_compr_params));
-
-	/* ToDo: remove duplicates */
-	prtd->num_channels = prtd->codec_param.codec.ch_in;
-
-	switch (prtd->codec_param.codec.sample_rate) {
-	case SNDRV_PCM_RATE_8000:
-		prtd->sample_rate = 8000;
-		break;
-	case SNDRV_PCM_RATE_11025:
-		prtd->sample_rate = 11025;
-		break;
-	/* ToDo: What about 12K and 24K sample rates ? */
-	case SNDRV_PCM_RATE_16000:
-		prtd->sample_rate = 16000;
-		break;
-	case SNDRV_PCM_RATE_22050:
-		prtd->sample_rate = 22050;
-		break;
-	case SNDRV_PCM_RATE_32000:
-		prtd->sample_rate = 32000;
-		break;
-	case SNDRV_PCM_RATE_44100:
-		prtd->sample_rate = 44100;
-		break;
-	case SNDRV_PCM_RATE_48000:
-		prtd->sample_rate = 48000;
-		break;
-	case SNDRV_PCM_RATE_64000:
-		prtd->sample_rate = 64000;
-		break;
-	case SNDRV_PCM_RATE_88200:
-		prtd->sample_rate = 88200;
-		break;
-	case SNDRV_PCM_RATE_96000:
-		prtd->sample_rate = 96000;
-		break;
-	case SNDRV_PCM_RATE_176400:
-		prtd->sample_rate = 176400;
-		break;
-	case SNDRV_PCM_RATE_192000:
-		prtd->sample_rate = 192000;
-		break;
-	}
-
-	pr_debug("%s: sample_rate %d\n", __func__, prtd->sample_rate);
+	num_rates = sizeof(supported_sample_rates)/sizeof(unsigned int);
+	for (i = 0; i < num_rates; i++)
+		if (params->codec.sample_rate == supported_sample_rates[i])
+			break;
+	if (i == num_rates)
+		return -EINVAL;
 
 	prtd->compr_passthr = prtd->codec_param.codec.compr_passthr;
 	pr_debug("%s: compr_passthr = %d", __func__, prtd->compr_passthr);
@@ -1302,6 +1282,17 @@ static int msm_compr_set_params(struct snd_compr_stream *cstream,
 			delay_time_ms - PARTIAL_DRAIN_ACK_EARLY_BY_MSEC : 0;
 	prtd->partial_drain_delay = delay_time_ms;
 
+	/*
+	 * To support 12000 and 24000 sample rates, allow raw HZ values.
+	 * https://www.codeaurora.org/cgit/quic/la/kernel/msm-3.10/commit/
+	 * ?id=423b7e3331b767aa1d6546557f1533879aa781bf
+	 */
+	memcpy(&prtd->codec_param, params, sizeof(struct snd_compr_params));
+
+	/* ToDo: remove duplicates */
+	prtd->num_channels = prtd->codec_param.codec.ch_in;
+	prtd->sample_rate = prtd->codec_param.codec.sample_rate;
+	pr_debug("%s: sample_rate %d\n", __func__, prtd->sample_rate);
 	ret = msm_compr_configure_dsp(cstream);
 
 	return ret;
@@ -1452,12 +1443,7 @@ static int msm_compr_trigger(struct snd_compr_stream *cstream, int cmd)
 		prtd->last_buffer = 0;
 		prtd->cmd_ack = 0;
 		if (!prtd->gapless_state.gapless_transition) {
-			spin_unlock_irqrestore(&prtd->lock, flags);
-			pr_debug("%s:[SNDRV_PCM_TRIGGER_STOP]issue CMD_PAUSE stream_id %d",__func__, ac->stream_id);
-			q6asm_stream_cmd_nowait(ac, CMD_PAUSE, ac->stream_id);
-			prtd->cmd_ack = 0;
-			spin_lock_irqsave(&prtd->lock, flags);
-			pr_debug("%s:[SNDRV_PCM_TRIGGER_STOP]issue CMD_FLUSH stream_id %d\n",__func__, ac->stream_id);
+			pr_debug("issue CMD_FLUSH stream_id %d\n", stream_id);
 			spin_unlock_irqrestore(&prtd->lock, flags);
 			q6asm_stream_cmd(
 				prtd->audio_client, CMD_FLUSH, stream_id);
@@ -1519,7 +1505,8 @@ static int msm_compr_trigger(struct snd_compr_stream *cstream, int cmd)
 				__func__);
 			rc = msm_compr_drain_buffer(prtd, &flags);
 			if (rc || !atomic_read(&prtd->start)) {
-				rc = -EINTR;
+				if (rc != -ENETRESET)
+					rc = -EINTR;
 				spin_unlock_irqrestore(&prtd->lock, flags);
 				break;
 			}
@@ -1607,6 +1594,8 @@ static int msm_compr_trigger(struct snd_compr_stream *cstream, int cmd)
 			prtd->first_buffer = 1;
 			prtd->last_buffer = 0;
 			prtd->gapless_state.gapless_transition = 1;
+			prtd->gapless_state.min_blk_size = 65537;
+			prtd->gapless_state.max_blk_size = 65537;
 			prtd->marker_timestamp = 0;
 
 			/*
@@ -1796,6 +1785,7 @@ static int msm_compr_pointer(struct snd_compr_stream *cstream,
 	uint64_t timestamp = 0;
 	int rc = 0, first_buffer;
 	unsigned long flags;
+	uint32_t gapless_transition;
 
 	pr_debug("%s\n", __func__);
 	memset(&tstamp, 0x0, sizeof(struct snd_compr_tstamp));
@@ -1814,13 +1804,17 @@ static int msm_compr_pointer(struct snd_compr_stream *cstream,
 		return -ENETRESET;
 	}
 
+	gapless_transition = prtd->gapless_state.gapless_transition;
 	spin_unlock_irqrestore(&prtd->lock, flags);
 
 	/*
 	 Query timestamp from DSP if some data is with it.
 	 This prevents timeouts.
 	*/
-	if (!first_buffer) {
+	if (!first_buffer || gapless_transition) {
+		if (gapless_transition)
+			pr_debug("%s session time in gapless transition", __func__);
+
 		rc = q6asm_get_session_time(prtd->audio_client, &timestamp);
 		if (rc < 0) {
 			pr_err("%s: Get Session Time return value =%lld\n",
@@ -2028,6 +2022,8 @@ static int msm_compr_set_metadata(struct snd_compr_stream *cstream,
 {
 	struct msm_compr_audio *prtd;
 	struct audio_client *ac;
+	struct asm_flac_cfg flac_cfg;
+	int ret = 0;
 	pr_debug("%s\n", __func__);
 
 	if (!metadata || !cstream)
@@ -2051,8 +2047,45 @@ static int msm_compr_set_metadata(struct snd_compr_stream *cstream,
 	} else if (metadata->key == SNDRV_COMPRESS_ENCODER_DELAY) {
 		pr_debug("%s, got encoder delay %u", __func__, metadata->value[0]);
 		prtd->gapless_state.initial_samples_drop = metadata->value[0];
+	} else if (metadata->key == SNDRV_COMPRESS_MIN_BLK_SIZE) {
+		pr_debug("%s, got min_blk_size %u",
+			__func__, metadata->value[0]);
+		prtd->gapless_state.min_blk_size = metadata->value[0];
+	} else if (metadata->key == SNDRV_COMPRESS_MAX_BLK_SIZE) {
+		pr_debug("%s, got max_blk_size %u",
+			__func__, metadata->value[0]);
+		prtd->gapless_state.max_blk_size = metadata->value[0];
 	}
 
+	if ((prtd->codec == FORMAT_FLAC) &&
+	    (prtd->gapless_state.min_blk_size >= 0) &&
+	    (prtd->gapless_state.min_blk_size <= FLAC_BLK_SIZE_LIMIT) &&
+	    (prtd->gapless_state.max_blk_size >= 0) &&
+	    (prtd->gapless_state.max_blk_size <= FLAC_BLK_SIZE_LIMIT)) {
+		pr_debug("%s: SND_AUDIOCODEC_FLAC\n", __func__);
+		memset(&flac_cfg, 0x0, sizeof(struct asm_flac_cfg));
+		flac_cfg.ch_cfg = prtd->num_channels;
+		flac_cfg.sample_rate = prtd->sample_rate;
+		flac_cfg.stream_info_present = 1;
+		flac_cfg.sample_size =
+			prtd->codec_param.codec.options.flac_dec.sample_size;
+		flac_cfg.min_blk_size =
+			prtd->gapless_state.min_blk_size;
+		flac_cfg.max_blk_size =
+			prtd->gapless_state.max_blk_size;
+		flac_cfg.max_frame_size =
+			prtd->codec_param.codec.options.flac_dec.max_frame_size;
+		flac_cfg.min_frame_size =
+			prtd->codec_param.codec.options.flac_dec.min_frame_size;
+		pr_debug("%s: min_blk_size %d max_blk_size %d\n",
+			__func__, flac_cfg.min_blk_size, flac_cfg.max_blk_size);
+
+		ret = q6asm_stream_media_format_block_flac(ac, &flac_cfg,
+								ac->stream_id);
+		if (ret < 0)
+			pr_err("%s: CMD Format block failed ret %d\n",
+				__func__, ret);
+	}
 	return 0;
 }
 
@@ -2450,7 +2483,7 @@ static int msm_compr_app_type_cfg_info(struct snd_kcontrol *kcontrol,
 	uinfo->type = SNDRV_CTL_ELEM_TYPE_INTEGER;
 	uinfo->count = 5;
 	uinfo->value.integer.min = 0;
-	uinfo->value.integer.max = 0xFFFFFFFF;
+	uinfo->value.integer.max = 0x7FFFFFFF;
 	return 0;
 }
 

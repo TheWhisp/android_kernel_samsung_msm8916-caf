@@ -23,7 +23,7 @@
 /* #define ESD_DEBUG */
 #define DEBUG_PRINT2			1
 
-#define TSP_GESTURE_MODE
+#define TSP_GESTURE_MODE	
 
 #define SEC_TSP_FACTORY_TEST
 #define TSP_BUF_SIZE 1024
@@ -423,11 +423,6 @@ struct mms_ts_info {
 	int scrub_x;
 	int scrub_y;
 #endif
-
-#ifdef CONFIG_TOUCHSCREEN_MMS300A_WAKE_GESTURE
-	unsigned char wake_gesture_enabled;
-	unsigned char ts_control;
-#endif
 	
 #ifdef TOUCHKEY
 	int (*keyled) (struct mms_ts_info *info,int on);
@@ -528,15 +523,6 @@ int mms_flash_fw_mms300(struct mms_ts_info *info, const u8 *fw_data, size_t fw_s
 static int fw_download_isp(struct mms_ts_info *info, const u8 *data, size_t len);
 int fw_download_isc(struct mms_ts_info *info, const u8 *fw_data);
 
-#ifdef CONFIG_TOUCHSCREEN_MMS300A_WAKE_GESTURE
-static ssize_t mms_wake_gesture_show(struct device *dev, struct device_attribute *attr, char *buf);
-static ssize_t mms_wake_gesture_store(struct device *dev,
-				struct device_attribute *attr, const char *buf, size_t count);
-
-static ssize_t mms_ts_control_show(struct device *dev, struct device_attribute *attr, char *buf);
-static ssize_t mms_ts_control_store(struct device *dev,
-				struct device_attribute *attr, const char *buf, size_t count);
-#endif
 
 #if defined(SEC_TSP_FACTORY_TEST)
 #define TSP_CMD(name, func) .cmd_name = name, .cmd_func = func
@@ -1028,11 +1014,6 @@ static irqreturn_t mms_ts_interrupt(int irq, void *dev_id)
 	u8 buf[MAX_FINGERS * EVENT_SZ] = { 0 };
 	u8 reg = MMS_INPUT_EVENT;
 
-#ifdef CONFIG_TOUCHSCREEN_MMS300A_WAKE_GESTURE
-	static unsigned long oldJiffies = 0;
-	static int oldY = 0, oldX = 0;
-#endif
-
 	struct i2c_msg msg[] = {
 		{
 			.addr = client->addr,
@@ -1306,41 +1287,8 @@ static irqreturn_t mms_ts_interrupt(int irq, void *dev_id)
 
 		input_report_key(info->input_dev, BTN_TOUCH, 1);
 
-#ifdef CONFIG_TOUCHSCREEN_MMS300A_WAKE_GESTURE
-		if(!info->ts_control) { // don't register the gesture if the device is already awake
-			if(info->wake_gesture_enabled == 1 && info->finger_state[id] == 0 && id == 0) {
-				unsigned long newJiffies = jiffies;
-				if((newJiffies - oldJiffies) > 10 && (newJiffies - oldJiffies) < 75) {
-
-					// Check the distance
-					int diffX = (x > oldX) ? (x - oldX) : (oldX - x);
-					int diffY = (y > oldY) ? (y - oldY) : (oldY - y);
-
-					if((diffX >= 0 && diffX <= 25) && (diffY >= 0 && diffY <= 25)) {
-						info->ts_control = 1;
-						pr_info("mms300: wake gesture\n");
-						pr_info("mms300: Old x %d and y %d, new x %d and y %d\n", oldX, oldY, x, y);
-						input_report_key(info->input_dev, KEY_WAKEUP, 1);
-						input_sync(info->input_dev);
-						msleep(10);
-						input_report_key(info->input_dev, KEY_WAKEUP, 0);
-						input_sync(info->input_dev);
-
-						disable_irq_wake(info->irq);
-					} else {
-						pr_info("mms300: ignore wake, taps too distant\n");
-					} 
-				}
-
-				oldJiffies = newJiffies;
-				oldX = x;
-				oldY = y;
-			}
-		}
-#endif
-
 #ifdef CONFIG_SAMSUNG_PRODUCT_SHIP
-		if (info->finger_state[id] == 0) { 
+		if (info->finger_state[id] == 0) {
 			info->finger_state[id] = 1;
 			touch_is_pressed++;
 			dev_notice(&client->dev,
@@ -3501,56 +3449,6 @@ static ssize_t show_cmd_result(struct device *dev, struct device_attribute
 	return snprintf(buf, TSP_BUF_SIZE, "%s\n", info->cmd_result);
 }
 
-#ifdef CONFIG_TOUCHSCREEN_MMS300A_WAKE_GESTURE
-static ssize_t mms_wake_gesture_show(struct device *dev, struct device_attribute *attr, char *buf)
-{
-	struct mms_ts_info *info = dev_get_drvdata(dev);
-
-	return snprintf(buf, BUF_SIZE, "%u\n", info->wake_gesture_enabled);
-}
-
-static ssize_t mms_wake_gesture_store(struct device *dev,
-				struct device_attribute *attr, const char *buf, size_t count)
-{
-	unsigned int wake_gesture;
-	struct mms_ts_info *info = dev_get_drvdata(dev);
-
-	if(sscanf(buf, "%u", &wake_gesture) != 1)
-		return -EINVAL;
-
-	if(wake_gesture > 1)
-		return -EINVAL;
-
-	info->wake_gesture_enabled = wake_gesture;
-
-	return count;
-}
-
-static ssize_t mms_ts_control_show(struct device *dev, struct device_attribute *attr, char *buf)
-{
-	struct mms_ts_info *info = dev_get_drvdata(dev);
-
-	return snprintf(buf, BUF_SIZE, "%u\n", info->ts_control);
-}
-
-static ssize_t mms_ts_control_store(struct device *dev,
-				struct device_attribute *attr, const char *buf, size_t count)
-{
-	unsigned int ts_control;
-	struct mms_ts_info *info = dev_get_drvdata(dev);
-
-	if(sscanf(buf, "%u", &ts_control) != 1)
-		return -EINVAL;
-
-	if(ts_control > 1)
-		return -EINVAL;
-
-	info->ts_control = ts_control;
-
-	return count;
-}
-#endif
-
 
 #ifdef TSP_GESTURE_MODE
 static ssize_t mms_scrub_position(struct device *dev,
@@ -3891,22 +3789,6 @@ static DEVICE_ATTR(touchkey_firm_version_phone, S_IRUGO,
                                 touchkey_fw_read, NULL);
 
 #endif
-
-#ifdef CONFIG_TOUCHSCREEN_MMS300A_WAKE_GESTURE
-static DEVICE_ATTR(wake_gesture, 0664, mms_wake_gesture_show, mms_wake_gesture_store);
-static DEVICE_ATTR(ts_control, 0664, mms_ts_control_show, mms_ts_control_store);
-
-static struct attribute *mms_wake_attrs[] = {
-	&dev_attr_wake_gesture.attr,
-	&dev_attr_ts_control.attr,
-	NULL,
-};
-
-static const struct attribute_group mms_wake_attr_group = {
-	.attrs = mms_wake_attrs,
-};
-#endif
-
 #ifdef ESD_DEBUG
 static DEVICE_ATTR(intensity_logging_on, S_IRUGO, show_intensity_logging_on,
 			NULL);
@@ -5782,12 +5664,6 @@ static int mms_ts_probe(struct i2c_client *client,
 #ifdef TSP_GLOVE_MODE
 	info->glove_mode = false;
 #endif
-
-#ifdef CONFIG_TOUCHSCREEN_MMS300A_WAKE_GESTURE
-	info->wake_gesture_enabled = 0;
-	info->ts_control = 0;
-#endif
-
 	info->power = melfas_power;
 #ifdef TOUCHKEY
 	info->keycode[0] = 0;
@@ -5871,11 +5747,6 @@ static int mms_ts_probe(struct i2c_client *client,
 	set_bit(EV_LED, input_dev->evbit);
 	set_bit(LED_MISC, input_dev->ledbit);
 #endif
-
-#ifdef CONFIG_TOUCHSCREEN_MMS300A_WAKE_GESTURE
-	set_bit(KEY_WAKEUP, info->input_dev->keybit);
-#endif
-
 #ifdef TSP_GESTURE_MODE
 	set_bit(KEY_BLACK_UI_GESTURE, info->input_dev->keybit);
 	info->lowpower_mode = 0;
@@ -5972,13 +5843,6 @@ static int mms_ts_probe(struct i2c_client *client,
 		return -EAGAIN;
 	}
 
-#endif
-
-#ifdef CONFIG_TOUCHSCREEN_MMS300A_WAKE_GESTURE
-	if (sysfs_create_group(&sec_touchscreen->kobj, &mms_wake_attr_group)) {
-		dev_err(&client->dev, "failed to create sysfs group for wake_gesture\n");
-		return -EAGAIN;
-	}
 #endif
 
 	#if 0
@@ -6137,8 +6001,6 @@ static void mms_ts_shutdown(struct i2c_client *client)
 {
 	struct mms_ts_info *info = i2c_get_clientdata(client);
 
-	pr_info("mms300: %s\n", __func__);
-
 	if (info->irq >= 0){
 		free_irq(info->irq, info);
 	}	
@@ -6157,18 +6019,12 @@ static int mms_ts_suspend(struct device *dev)
 	struct i2c_client *client = to_i2c_client(dev);
 	struct mms_ts_info *info = i2c_get_clientdata(client);
 
-#ifdef CONFIG_TOUCHSCREEN_MMS300A_WAKE_GESTURE
-	if(info->wake_gesture_enabled == 1) {
-		info->ts_control = 0;
-		enable_irq_wake(info->irq);
-		return 0;
-	}
-#endif
 	mutex_lock(&info->lock);
 	if (!info->enabled)
 		goto out;
 	if (!info->input_dev->users)
 		goto out;
+
 	info->enabled = false;
 	disable_irq_nosync(info->irq);
 
@@ -6205,11 +6061,6 @@ static int mms_ts_resume(struct device *dev)
 	struct i2c_client *client = to_i2c_client(dev);
 	struct mms_ts_info *info = i2c_get_clientdata(client);
 
-#ifdef CONFIG_TOUCHSCREEN_MMS300A_WAKE_GESTURE
-	if(info->wake_gesture_enabled == 1 && info->ts_control != 0)
-		disable_irq_wake(info->irq);
-#endif
-
 	if (info->enabled)
 		return 0;
 
@@ -6237,9 +6088,6 @@ static int mms_ts_resume(struct device *dev)
 		i2c_smbus_write_byte_data(info->client, 0x33, 0x2);
 	}
 	info->enabled = true;
-#ifdef CONFIG_TOUCHSCREEN_MMS300A_WAKE_GESTURE
-	info->ts_control = 1;
-#endif
 	mms_set_noise_mode(info);
 
 	/* Because irq_type by EXT_INTxCON register is changed to low_level

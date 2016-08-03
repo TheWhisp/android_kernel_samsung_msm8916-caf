@@ -110,6 +110,7 @@ static struct mdss_mdp_pipe *mdss_mdp_rotator_pipe_alloc(void)
 		return NULL;
 	}
 
+	MDSS_XLOG(pipe->num, mixer->num);
 	pipe->mixer_stage = MDSS_MDP_STAGE_UNUSED;
 
 	return pipe;
@@ -287,7 +288,15 @@ static int mdss_mdp_rotator_queue_sub(struct mdss_mdp_rotator_session *rot,
 	ATRACE_BEGIN("rotator_kickoff");
 	ret = mdss_mdp_rotator_kickoff(rot_ctl, rot, dst_data);
 	ATRACE_END("rotator_kickoff");
+	if (ret) {
+		pr_err("mdss_mdp_rotator_kickoff error : %d\n", ret);
+		goto error;
+	}
 
+	if (ret) {
+		pr_err("unable to kickoff rot data\n");
+		goto error;
+	}
 	return ret;
 error:
 	if (orig_ctl->shared_lock)
@@ -496,8 +505,6 @@ int mdss_mdp_rotator_setup(struct msm_fb_data_type *mfd,
 	struct mdss_overlay_private *mdp5_data = mfd_to_mdp5_data(mfd);
 	struct mdss_mdp_rotator_session *rot = NULL;
 	struct mdss_mdp_format_params *fmt;
-	struct mdss_mdp_pipe *pipe;
-	struct mdss_mdp_perf_params perf;
 	u32 bwc_enabled;
 	bool format_changed = false;
 	int ret = 0;
@@ -617,15 +624,6 @@ int mdss_mdp_rotator_setup(struct msm_fb_data_type *mfd,
 		goto rot_err;
 
 	req->id = rot->session_id;
-	pipe = rot->pipe;
-	if (pipe && !(pipe->flags & MDP_SECURE_OVERLAY_SESSION) &&
-				pipe->mixer_left && pipe->mixer_left->ctl) {
-		struct mdss_mdp_ctl *ctl;
-		ctl = rot->pipe->mixer_left->ctl;
-		mdss_mdp_perf_calc_pipe(pipe, &perf, NULL,
-						PERF_CALC_PIPE_SINGLE_LAYER);
-		ctl->bw_pending =  perf.bw_overlap;
-	}
 
  rot_err:
 	if (ret) {
